@@ -45,7 +45,6 @@ pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
     vae=vae,
     torch_dtype=torch.float16,
-    safety_checker=None,
     feature_extractor=None
 )
 pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
