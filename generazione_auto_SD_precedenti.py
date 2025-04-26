@@ -57,15 +57,11 @@ for model_id in MODELS:
             model_id,
             scheduler=scheduler,
             torch_dtype=torch.float16,
-            safety_checker=None,
-            feature_extractor=None
         )
     else:
         pipe = StableDiffusionPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.float16,
-            safety_checker=None,
-            feature_extractor=None
         )
 
     pipe.to("cuda")

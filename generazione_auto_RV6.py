@@ -2,19 +2,21 @@ from diffusers import StableDiffusionPipeline, AutoencoderKL, DPMSolverMultistep
 import torch
 import os
 from tqdm import tqdm
+from PIL import Image
+import numpy as np
 
 # Modello
 MODEL_ID = "SG161222/Realistic_Vision_V6.0_B1_noVAE"
 VAE_PATH = "models/vae-ft-mse/vae.pt"
 
-# Impostazioni consigliate dal README
+# Impostazioni
 width = 896
 height = 896
 num_images = 20
-num_steps = 30  # steps consigliati: 25+ (con DPM++ SDE Karras)
+num_steps = 30
 guidance = 5.5
 
-# Negative prompt consigliato
+# Negative prompt
 negative_prompt = (
     "(deformed iris, deformed pupils, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime), "
     "text, cropped, out of frame, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, "
@@ -38,14 +40,13 @@ if os.path.exists(log_file):
     with open(log_file, "r") as f:
         completed = set(line.strip() for line in f)
 
-# Caricamento pipeline con VAE esterno e scheduler DPM++ SDE Karras
+# Caricamento pipeline
 print("🔧 Caricamento VAE e pipeline...")
 vae = AutoencoderKL.from_single_file(VAE_PATH, torch_dtype=torch.float16)
 pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
     vae=vae,
     torch_dtype=torch.float16,
-    feature_extractor=None
 )
 pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
 pipe.to("cuda")
@@ -56,21 +57,39 @@ for prompt_index, prompt in enumerate(tqdm(prompts, desc=model_name), start=1):
         filename = f"{prompt_index}_{model_name}_{image_index}.png"
         save_path = os.path.join(output_dir, filename)
 
-        if filename in completed:
-            continue
+        retry_attempts = 5  # massimo 5 tentativi
 
-        image = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=num_steps,
-            guidance_scale=guidance,
-            width=width,
-            height=height
-        ).images[0]
+        while retry_attempts > 0:
+            if filename in completed and os.path.exists(save_path):
+                img = Image.open(save_path)
+                img_array = np.array(img)
+                if img_array.mean() > 2:
+                    break  # immagine buona, passa oltre
 
-        image.save(save_path)
+            print(f"⚠️ Rilevata immagine nera: rigenero {filename} ({6 - retry_attempts}/5)")
 
-        with open(log_file, "a") as logf:
-            logf.write(filename + "\n")
+            # Rigenera
+            image = pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_steps,
+                guidance_scale=guidance,
+                width=width,
+                height=height
+            ).images[0]
 
-        print(f"✅ Salvata: {filename}")
+            image.save(save_path)
+
+            # Se rigenerata correttamente, salva e esci dal ciclo
+            img_array = np.array(image)
+            if img_array.mean() > 2:
+                with open(log_file, "a") as logf:
+                    logf.write(filename + "\n")
+                print(f"✅ Salvata: {filename}")
+                break
+
+            retry_attempts -= 1
+
+        if retry_attempts == 0:
+            print(f"❌ Errore: {filename} non è stato possibile rigenerarlo senza NSFW dopo 5 tentativi.")
+
